@@ -2,12 +2,19 @@
 *.apk
 *.aab
 *.obb
+*.so
+*.keystore
 dump.cs
 il2cpp.h
 script.json
 global-metadata.dat
 tools/bin/
+tools/
 *.log
+
+# native injector build outputs (sources are committed, binaries are not)
+native/libmain.so
+native/reels.keystore
 
 # build output goes to releases, not git
 build/

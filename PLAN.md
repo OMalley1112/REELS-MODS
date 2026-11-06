@@ -32,16 +32,20 @@ Two possible engines, both need the game files first:
 
 ## Steps
 
-1. [ ] Quest connected: Developer Mode ON, USB-C to PC, "Allow USB debugging" accepted.
-2. [ ] Pull the game: `adb shell pm list packages` -> find Reel -> `adb pull` the APK.
-3. [ ] Unpack APK: check `lib/arm64-v8a/` for `libil2cpp.so` (IL2CPP) or Mono (Assembly-CSharp.dll).
-4. [ ] Dump classes -> find the coin / bundle / rod-unlock code and where the values live.
-5. [ ] Build the menu (world-space canvas rows, same look as RIFTIX: gradient, pop, notifications).
-6. [ ] Wire REELS tab: Give Coins, Give Bundles, unlock rows.
-7. [ ] Repack + install, test in-game with the X button, report which mods actually stick.
+1. [x] Quest connected, pulled `Reel.apk` v0.1.41 (1.12 GB, arm64, IL2CPP).
+2. [x] Extracted `libil2cpp.so` + `global-metadata.dat`.
+3. [x] Dumped classes with Il2CppDumper v6.7.46 (built from source) -> `dump.cs`.
+4. [x] Economy mapped: `PlayerProfile` (coins/xp/crowns/candy/medals), server
+       mirror `GameProfileSnapshot`, sync via `GameEconomySession`.
+5. [x] Native injector written (`native/injector.cpp`): libmain wrapper +
+       `VRFishGame.Update` inline hook + world-space TMP menu.
+6. [x] Repacked + signed `Reel-modded.apk` (see `docs/INJECTION.md`).
+7. [ ] On-device test: install, press X, give coins, check what the server
+       keeps. Then add Give Bundles + persist-check.
 
 ## Files
 
-- `tools/`  - dumpers, apk unpackers (added as needed)
-- `src/`    - menu + mod source
-- `build/`  - output .so / patched apk
+- `native/`  - in-game injector source (`injector.cpp`, `repack.ps1`)
+- `unity/`   - standalone Reel Mods Quest app source
+- `docs/`    - ENGINE / MENU / CONTROLS / GET-IN-GAME / INJECTION
+- `tools/`   - dumper + pulled game files (git-ignored, derived)
