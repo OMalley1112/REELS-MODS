@@ -1,0 +1,12 @@
+# never commit game files or pulled APKs
+*.apk
+*.so
+*.aab
+*.obb
+dump.cs
+il2cpp.h
+script.json
+global-metadata.dat
+build/
+tools/bin/
+*.log
