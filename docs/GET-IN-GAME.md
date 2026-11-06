@@ -13,7 +13,7 @@ This guide covers both. Part B is the one you actually want.
 
 ## A. Install the menu app (2 minutes)
 
-1. Download `REELS-MODS-0.2.0.apk` from the Releases page.
+1. Download `Reel-Mods-0.2.1.apk` from the Releases page.
 2. Put the Quest on and enable **Developer Mode**:
    - Phone → **Meta Horizon app** → menu → **Settings** → **Devices** → your Quest → **Developer Mode** → ON
 3. Plug the Quest into the PC with the USB-C cable.
@@ -25,9 +25,10 @@ This guide covers both. Part B is the one you actually want.
    You must see a line ending in `device`, not `unauthorized` or nothing.
 6. Install:
    ```
-   adb install -r "C:\path\to\REELS-MODS-0.2.0.apk"
+   adb install -r "C:\path\to\Reel-Mods-0.2.1.apk"
    ```
-7. In the Quest: **Library → filter icon → Unknown Sources → REELS MODS**.
+7. In the Quest: **Library → filter icon → Unknown Sources → Reel Mods**.
+   (The in-panel title still reads **R E E L S   M O D S**.)
 8. Press **X** or **Y** on the left controller (or **A** / **B** on the right) to open the panel.
 
 ---

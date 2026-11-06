@@ -20,7 +20,7 @@ public static class BuildScript
     [MenuItem("REELS/Build APK")]
     public static void Build()
     {
-        BuildInternal(FindOutputPath());
+        BuildInternal();
     }
 
     public static void BuildFromCli()
@@ -28,7 +28,7 @@ public static class BuildScript
         int code = 0;
         try
         {
-            BuildInternal(FindOutputPath());
+            BuildInternal();
         }
         catch (System.Exception e)
         {
@@ -38,11 +38,16 @@ public static class BuildScript
         EditorApplication.Exit(code);
     }
 
-    static string FindOutputPath()
+    /// <summary>
+    /// NOTE: the version is read <i>after</i> the player settings are applied,
+    /// otherwise the path is computed from whatever the previous build wrote
+    /// into ProjectSettings.
+    /// </summary>
+    static string OutputPathForCurrentVersion()
     {
         string dir = Path.Combine(ProjectRoot(), "build");
         Directory.CreateDirectory(dir);
-        return Path.Combine(dir, "REELS-MODS-" + PlayerSettings.bundleVersion + ".apk");
+        return Path.Combine(dir, "Reel-Mods-" + PlayerSettings.bundleVersion + ".apk");
     }
 
     static string ProjectRoot()
@@ -50,15 +55,15 @@ public static class BuildScript
         return Directory.GetParent(Application.dataPath).FullName;
     }
 
-    static void BuildInternal(string outputPath)
+    static void BuildInternal()
     {
         EditorUserBuildSettings.SwitchActiveBuildTarget(BuildTargetGroup.Android, BuildTarget.Android);
         EditorUserBuildSettings.androidBuildSystem = AndroidBuildSystem.Gradle;
 
         // ---- player settings -------------------------------------------------
-        PlayerSettings.productName = "REELS MODS";
+        PlayerSettings.productName = "Reel Mods";
         PlayerSettings.companyName = "ReelsMods";
-        PlayerSettings.bundleVersion = "0.2.0";
+        PlayerSettings.bundleVersion = "0.2.1";
         PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.reelsmods.menu");
         PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
@@ -86,6 +91,7 @@ public static class BuildScript
         EditorSceneManager.OpenScene(ScenePath);
 
         // ---- build -----------------------------------------------------------
+        string outputPath = OutputPathForCurrentVersion();
         var options = new BuildPlayerOptions
         {
             scenes = new[] { ScenePath },

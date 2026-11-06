@@ -292,7 +292,7 @@ namespace ReelsMods
                     PrevPage();
                     return;
                 case "about":
-                    ShowToast("REELS MODS 0.2.0 - standalone menu");
+                    ShowToast("Reel Mods - mod menu for Reel");
                     return;
                 case "save_loadout":
                     ShowToast("Loadout saved");
