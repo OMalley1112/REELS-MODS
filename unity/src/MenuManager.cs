@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -73,7 +74,11 @@ namespace ReelsMods
             BuildCanvas();
             BuildPanel();
             BuildRows();
+            BuildAction();
             Rebuild();
+
+            if (PlayerPrefs.GetInt("auto_open", 0) == 1)
+                StartCoroutine(AutoOpenReel());
 
             laser = new GameObject("Laser", typeof(LineRenderer)).GetComponent<LineRenderer>();
             laser.positionCount = 2;
@@ -225,6 +230,56 @@ namespace ReelsMods
             }
         }
 
+        /// <summary>
+        /// Always-visible action bar under the row list: this is the button
+        /// that hands off to the real game.
+        /// </summary>
+        private void BuildAction()
+        {
+            var rt = Ui.Rect("open_reel", panel,
+                new Vector2(Theme.CanvasW - 120f, 110f), new Vector2(0f, -245f));
+
+            var img = rt.gameObject.AddComponent<Image>();
+            img.sprite = Ui.Rounded;
+            img.type = Image.Type.Sliced;
+            img.color = Theme.Accent;
+            img.raycastTarget = true;
+
+            var t = Ui.Label(rt, "\u25B6   OPEN REEL", 36, TextAnchor.MiddleCenter,
+                new Color(0.07f, 0.05f, 0.12f),
+                Vector2.zero, new Vector2(Theme.CanvasW - 120f, 110f));
+            t.fontStyle = FontStyle.Bold;
+
+            var btn = rt.gameObject.AddComponent<Button>();
+            btn.transition = Selectable.Transition.None;
+            btn.onClick.AddListener(OpenReel);
+        }
+
+        private IEnumerator AutoOpenReel()
+        {
+            yield return new WaitForSecondsRealtime(1.5f);
+            OpenReel();
+        }
+
+        private void OpenReel()
+        {
+            if (!GameLauncher.IsAndroid)
+            {
+                ShowToast("Reel only runs on the Quest");
+                return;
+            }
+
+            string pkg, cls;
+            if (GameLauncher.FindReel(out pkg, out cls) && GameLauncher.Launch(pkg, cls))
+            {
+                ShowToast("Opening Reel...");
+            }
+            else
+            {
+                ShowToast("Reel not found - install it first");
+            }
+        }
+
         // ------------------------------------------------------------- content
 
         private void Rebuild()
@@ -299,6 +354,11 @@ namespace ReelsMods
                     return;
                 case "reset_loadout":
                     ShowToast("Loadout reset");
+                    return;
+                case "auto_open":
+                    PlayerPrefs.SetInt("auto_open", r.def.on ? 1 : 0);
+                    PlayerPrefs.Save();
+                    if (r.def.on) OpenReel();
                     return;
             }
 

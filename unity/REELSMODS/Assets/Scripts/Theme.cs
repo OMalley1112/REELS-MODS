@@ -34,7 +34,7 @@ namespace ReelsMods
         public const float RowTop    = 410f;
         public const float RowH      = 100f;
         public const float RowGap    = 18f;
-        public const int   RowsPerPage = 6;
+        public const int   RowsPerPage = 5;
         public const float FooterY   = -370f;
         public const float FooterH   = 90f;
         public const float ToastY    = -560f;
@@ -98,6 +98,7 @@ namespace ReelsMods
             new ModDef("god_fish",      "Never Lose A Fish", false, Tabs.Reels),
 
             // MAIN tab - menu settings
+            new ModDef("auto_open",     "Auto Open Reel",    false, Tabs.Main),
             new ModDef("set_hand",      "Use Right Hand",    false, Tabs.Main),
             new ModDef("set_notif",     "Notifications",     true,  Tabs.Main),
             new ModDef("set_laser",     "Pointer Laser",     true,  Tabs.Main),

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Base manifest for Reel Mods.
+  Unity merges this with the manifest the Android build pipeline generates,
+  so only the bits Unity does not add ourselves are declared here:
+    * QUERY_ALL_PACKAGES  - lets the launcher find Reel (Android 11+ package
+                            visibility would otherwise hide it)
+    * <queries>           - narrower fallback for the same reason
+    * Quest device metadata
+  Deliberately no <activity>: Unity injects UnityPlayerActivity itself.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.reelsmods.menu">
+
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <uses-feature android:name="android.hardware.vr.headtracking" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <!-- no android:label here: Unity sets it from productName and the
+         merger treats a second label as a collision -->
+    <application>
+        <meta-data android:name="com.oculus.supportedDevices"
+                   android:value="quest|quest2|quest3|quest3s|questpro" />
+        <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+    </application>
+
+</manifest>

@@ -30,7 +30,7 @@ Download the APK from **[Releases](https://github.com/OMalley1112/REELS-MODS/rel
 and put it on the headset:
 
 ```
-adb install -r Reel-Mods-0.2.1.apk
+adb install -r Reel-Mods-0.2.2.apk
 ```
 
 Then **Library → filter icon → Unknown Sources → Reel Mods**.
@@ -38,12 +38,21 @@ Then **Library → filter icon → Unknown Sources → Reel Mods**.
 **Controls:** X or Y (left hand) / A or B (right hand) opens the panel ·
 trigger points and clicks · `<` `>` change page · tabs MAIN / REELS / PAGES.
 
+**▶ OPEN REEL** — the button under the row list finds Reel on the headset and
+launches it. Turn on **Auto Open Reel** (MAIN tab) and the app will boot
+straight into the game after1.5s.
+
+> Opening Reel is *not* the same as modding it. The launcher only starts the
+> game; the REELS toggles still need Reel's files before they write anything.
+> See `docs/GET-IN-GAME.md`.
+
 ## Status
 
 | Step | State |
 |---|---|
 | Repo + plan + docs | done |
-| Standalone menu APK, installs and runs on Quest | **done — v0.2.1** |
+| Standalone menu APK, installs and runs on Quest | **done — v0.2.2** |
+| One-tap launch of Reel from inside the menu | **done — v0.2.2** |
 | Quest connected / Developer Mode | waiting on you |
 | Pull Reel APK | blocked (needs headset) |
 | Detect IL2CPP vs Mono | blocked |
