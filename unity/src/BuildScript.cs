@@ -156,39 +156,45 @@ public static class BuildScript
     /// <summary>Turn on the Oculus loader for the Android target.</summary>
     static void EnableOculusXr()
     {
-        XRGeneralSettingsPerBuildTarget perTarget = null;
-        EditorBuildSettings.TryGetConfigObject(XRGeneralSettings.k_SettingsKey, out perTarget);
+        // GetOrCreate() is internal but it is the only path that both creates
+        // Assets/XR/XRGeneralSettingsPerBuildTarget.asset and registers it as
+        // an EditorBuildSettings config object. Calling AddConfigObject with a
+        // freshly CreateInstance'd object throws "non-persisted config object".
+        var perTargetType = typeof(XRGeneralSettingsPerBuildTarget);
+        var getOrCreate = perTargetType.GetMethod("GetOrCreate",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        XRGeneralSettingsPerBuildTarget perTarget;
+        if (getOrCreate != null)
+        {
+            perTarget = (XRGeneralSettingsPerBuildTarget)getOrCreate.Invoke(null, null);
+        }
+        else
+        {
+            EditorBuildSettings.TryGetConfigObject(XRGeneralSettings.k_SettingsKey, out perTarget);
+        }
 
         if (perTarget == null)
-        {
-            perTarget = ScriptableObject.CreateInstance<XRGeneralSettingsPerBuildTarget>();
-            perTarget.name = "XR General Settings";
-            EditorBuildSettings.AddConfigObject(XRGeneralSettings.k_SettingsKey, perTarget, true);
-        }
+            throw new System.Exception("could not create XR general settings");
+
+        if (!perTarget.HasSettingsForBuildTarget(BuildTargetGroup.Android))
+            perTarget.CreateDefaultSettingsForBuildTarget(BuildTargetGroup.Android);
+        if (!perTarget.HasManagerSettingsForBuildTarget(BuildTargetGroup.Android))
+            perTarget.CreateDefaultManagerSettingsForBuildTarget(BuildTargetGroup.Android);
 
         var settings = perTarget.SettingsForBuildTarget(BuildTargetGroup.Android);
-        if (settings == null)
-        {
-            settings = ScriptableObject.CreateInstance<XRGeneralSettings>();
-            settings.name = "Android Settings";
-            perTarget.SetSettingsForBuildTarget(BuildTargetGroup.Android, settings);
-        }
-
-        if (settings.Manager == null)
-        {
-            var mgr = ScriptableObject.CreateInstance<XRManagerSettings>();
-            mgr.name = "Android XR Managers";
-            settings.Manager = mgr;
-        }
-
         settings.InitManagerOnStart = true;
+        EditorUtility.SetDirty(settings);
 
+        // NB: the Oculus loader lives in Unity.XR.Oculus, not UnityEngine.XR.Oculus
         bool ok = XRPackageMetadataStore.AssignLoader(settings.Manager,
-            "UnityEngine.XR.Oculus.OculusLoader", BuildTargetGroup.Android);
+            "Unity.XR.Oculus.OculusLoader", BuildTargetGroup.Android);
 
         Debug.Log("[REELS] oculus loader assigned: " + ok);
+        if (!ok)
+            throw new System.Exception("could not assign the Oculus XR loader");
+
         EditorUtility.SetDirty(perTarget);
-        EditorUtility.SetDirty(settings);
         AssetDatabase.SaveAssets();
     }
 }
