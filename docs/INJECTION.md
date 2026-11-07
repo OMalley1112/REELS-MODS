@@ -129,3 +129,39 @@ fail on device:
    accepts 64-bit STP-to-sp prologues, requires a relocatable ADRP at
    slot 2, a plain ALU/mov at slot 3, and refuses PC-rel branches
    `relocate()` cannot rewrite (it handles ADR/ADRP/LDR-literal only).
+
+### Trampoline page left non-executable (fixed in `5e6cdcb`)
+
+With every earlier fix working on device (`il2cpp domain ready` ->
+`core resolved OK` -> `VRFishGame.Update` -> `hook installed` ->
+`REELS MODS ready`) the game still died ~6 s later:
+
+`SIGSEGV SEGV_ACCERR, fault addr = the trampoline page, #01 hooked_update+40`
+
+When `install_hook` gained the target-page `mprotect` handling, the
+trampoline's own `mprotect(page, PROT_READ|PROT_EXEC)` was dropped, so the
+mmap'd RW page was never made executable and the first jump into it hit
+ACCERR. The trampoline is now made RX before the hook is published, and a
+failure there is fatal to `install_hook` instead of silent.
+
+### Trampoline 8 GB away: relocated `adrp` overflows (fixed in `ddcab5`)
+
+Next run: hook installed, trampoline returned to `target+16` correctly,
+then `SIGSEGV SEGV_MAPERR` on the *next* real instruction, with
+`x20 = 0x7d5c7cf000` (page-aligned garbage) and `x16 = target+16`.
+
+`mmap(nullptr, ...)` had put the trampoline ~8 GB from `libil2cpp`.
+The moved `adrp x20` must be re-encoded for the new PC, which needs an
+immediate of `+/-8 GB` - but ADRP only carries `+/-4 GB`. The value
+overflowed, `x20` came back garbage, and the first instruction that used
+it died. Distance, not permissions, was the problem.
+
+`install_hook` now:
+
+* allocates with `mmap_near(target)` - walks outward from the target
+  (1 MB .. 1.7 GB) using `MAP_FIXED_NOREPLACE`, falling back to a hint
+  mapping and finally a plain one, so the delta is a few MB at most;
+* re-decodes every moved ADR/ADRP/LDR-literal via `reloc_reaches()` and
+  **aborts the hook** (`munmap`, no patch) if it would be out of range -
+  a half-relocated hook is a guaranteed crash, so no hook beats a crash;
+* logs the trampoline delta when it does abort, for diagnosis.
