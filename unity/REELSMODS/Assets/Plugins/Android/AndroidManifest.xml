@@ -7,7 +7,10 @@
                             visibility would otherwise hide it)
     * <queries>           - narrower fallback for the same reason
     * Quest device metadata
-  Deliberately no <activity>: Unity injects UnityPlayerActivity itself.
+  Deliberately no <activity> element of our own: Unity injects
+  UnityPlayerActivity itself. We DO attach the MAIN/LAUNCHER intent-filter
+  to it below, because Unity injects the <activity> with no intent-filter,
+  which leaves the APK with no launchable activity (app never opens).
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
           package="com.reelsmods.menu">
@@ -30,6 +33,19 @@
         <meta-data android:name="com.oculus.supportedDevices"
                    android:value="quest|quest2|quest3|quest3s|questpro" />
         <meta-data android:name="com.oculus.vr.focusaware" android:value="true" />
+
+        <!-- Unity injects this activity with no intent-filter; without MAIN/
+             LAUNCHER the APK has no launchable activity and the app icon
+             does nothing ("No activities found"). The merger attaches these
+             attributes/filter to Unity's own <activity> element. -->
+        <activity android:name="com.unity3d.player.UnityPlayerActivity"
+                  android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="com.oculus.intent.category.VR" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

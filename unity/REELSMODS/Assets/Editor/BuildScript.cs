@@ -63,7 +63,7 @@ public static class BuildScript
         // ---- player settings -------------------------------------------------
         PlayerSettings.productName = "Reel Mods";
         PlayerSettings.companyName = "ReelsMods";
-        PlayerSettings.bundleVersion = "0.2.2";
+        PlayerSettings.bundleVersion = "0.2.3";
         PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Android, "com.reelsmods.menu");
         PlayerSettings.SetScriptingBackend(BuildTargetGroup.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
