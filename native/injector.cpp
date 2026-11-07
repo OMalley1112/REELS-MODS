@@ -797,11 +797,14 @@ static bool install_hook(void* target) {
         LOGE("mprotect RW failed: %s", strerror(errno));
         return false;
     }
-    // Everything the target needs must be ready BEFORE the patch lands: the
-    // instant those 16 bytes are overwritten, the next Update jumps into
-    // hooked_update. Make the trampoline executable and publish g_tramp
-    // first, so there is no window where hooked_update runs against an
-    // RW-only page (bug #5) or a null trampoline.
+    // Publish the trampoline and make it executable BEFORE the patch lands.
+    // The instant those 16 bytes are overwritten, the next Update can jump
+    // into hooked_update - and hooked_update reads the `api` table the
+    // worker filled in above. Without a barrier here the compiler is free
+    // to sink those stores past the patch write, so a first hooked frame
+    // arriving microseconds later could call through a null pointer.
+    // (bug #5 was an RW-only trampoline, this is the null-table cousin.)
+    __sync_synchronize();
     if (mprotect(page, 4096, PROT_READ | PROT_EXEC) != 0) {
         LOGE("mprotect trampoline RX failed: %s", strerror(errno));
         munmap(page, 4096);
