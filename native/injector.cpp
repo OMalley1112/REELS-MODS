@@ -591,9 +591,40 @@ static uint32_t relocate(uint32_t ins, uintptr_t oldpc, uintptr_t newpc) {
     return ins;
 }
 
+// ---------------------------------------------------------------- auto grant
+// The standalone Reel Mods APK only launches Reel - the money has to be
+// granted from inside the game. As soon as the profile object exists we
+// max every currency automatically, then re-apply twice more (10 s / 30 s
+// later) to outrun a server sync that might roll the wallet back.
+static int gAutoFrame   = 0;
+static int gAutoPasses  = 0;
+static int gAutoNextAt  = 0;
+static int gAutoDone    = 0;
+
+static void auto_grant_tick() {
+    if (gAutoDone) return;
+    gAutoFrame++;
+    if (!get_profile()) return;                       // progression not up yet
+    if (gAutoFrame < gAutoNextAt) return;             // waiting out a re-apply delay
+
+    max_all();                                        // logs "max_all applied"
+    gAutoPasses++;
+    set_status("ALL COINS GRANTED");
+    LOGI("auto grant pass %d at frame %d", gAutoPasses, gAutoFrame);
+
+    if (gAutoPasses >= 3) {
+        gAutoDone = 1;
+        LOGI("auto grant complete: coins/crowns/candy/medals/xp maxed");
+    } else {
+        // ~600 frames = 10 s, then ~1800 = 30 s (at 60 fps)
+        gAutoNextAt = gAutoFrame + (gAutoPasses == 1 ? 600 : 1800);
+    }
+}
+
 static void hooked_update(void* self) {
     g_tramp(self);
     menu_tick();
+    auto_grant_tick();
 }
 
 static bool install_hook(void* target) {
