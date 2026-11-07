@@ -30,7 +30,7 @@ Download the APK from **[Releases](https://github.com/OMalley1112/REELS-MODS/rel
 and put it on the headset:
 
 ```
-adb install -r Reel-Mods-0.2.3.apk
+adb install -r Reel-Mods-0.2.4.apk
 ```
 
 > **0.2.2 would not open** (Unity injects `UnityPlayerActivity` with no
@@ -55,8 +55,8 @@ straight into the game after1.5s.
 | Step | State |
 |---|---|
 | Repo + plan + docs | done |
-| Standalone menu APK, installs and runs on Quest | **done — v0.2.3** |
-| One-tap launch of Reel from inside the menu | **done — v0.2.3** |
+| Standalone menu APK, installs and runs on Quest | **done — v0.2.4** |
+| One-tap launch of Reel from inside the menu | **done — v0.2.4** |
 | In-game injection (wrapped `libmain.so`, X opens REELS MODS) | **done — source + docs, device test pending** |
 | Quest connected / Developer Mode | done |
 | Pull Reel APK | done (`tools/game/Reel.apk`, git-ignored) |
