@@ -181,3 +181,40 @@ they are not decoded). No instruction in the trampoline encodes a
 distance, so the page can be anywhere - the remaining `mmap_near` is only
 a cache-locality nicety, and its plain-`mmap` fallback is fine. The log
 now prints the trampoline delta either way.
+### Worker probed il2cpp on a fixed timer: cold-start SIGSEGV (fixed: no il2cpp calls from the worker)
+
+Device log (fresh install, game opened for the first time):
+
+`
+23:29:03.136  IL2CPP: JNI_OnLoad                 <- il2cpp_init STARTS
+23:29:03.210  reels-worker arms its 4.0 s gate
+23:29:07.212  SIGSEGV SEGV_MAPERR, fault addr 0, x8 = 0x135
+              tid 9371 name: reels-worker        <- il2cpp still initialising
+23:29:07.230  Process com.mostsanestudios.reel has died
+`
+
+The readiness gate was a **wall-clock timer measured from wrapper load**, not
+from il2cpp init. Reel is a 1.1 GB game: on a cold start `il2cpp_init` takes
+longer than 4 s, so the first `il2cpp_domain_get()` ran against a
+half-built VM and segfaulted inside libil2cpp. Warm starts got past it - the
+same binary reached `core resolved OK` 16 minutes earlier - so this was a
+race, not a logic error: unfixable by tuning the number.
+
+**The fix is to remove the race instead of lengthening it.** The worker now
+makes *zero* il2cpp calls:
+
+* the hook target is computed as `load base + 0x6F7BCD4` (base from
+  `dladdr(il2cpp_domain_get)`, falling back to `/proc/self/maps`), with
+  the prologue bytes still verified by `install_hook` before anything is
+  patched - a wrong RVA aborts, it cannot corrupt the game;
+* every il2cpp call moved into `hooked_update`, which only ever runs from
+  managed `VRFishGame.Update` on the already-attached UnityMain thread.
+  If Update is executing, the runtime is initialised - by construction, not
+  by timing;
+* the RVA is cross-checked against `MethodInfo->methodPointer` once the
+  runtime answers, and the result is logged (`RVA cross-check OK/MISMATCH`).
+
+Two smaller races closed while in here: `g_tramp` is now published and the
+trampoline made executable *before* the 16-byte patch is written (previously
+there was a window where the first hooked frame could run against a null or
+non-executable trampoline), and `hooked_update` null-checks `g_tramp`.

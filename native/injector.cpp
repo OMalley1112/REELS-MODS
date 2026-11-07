@@ -10,6 +10,9 @@
 //   Y or A     use selected row
 //   up / down  move selection
 // ============================================================================
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <jni.h>
 #include <dlfcn.h>
 #include <pthread.h>
@@ -624,10 +627,23 @@ static void auto_grant_tick() {
     }
 }
 
+static bool resolve_core();
+static bool g_coreOk = false;
+
+// VRFishGame.Update hook body. This is the ONLY place il2cpp is ever called
+// from (bug #7): it runs on UnityMain *inside* a managed method, so the
+// runtime is provably initialised. The worker used to probe il2cpp from a
+// fixed 4 s timer, and on a cold start il2cpp_init was still running when
+// the timer expired - the first domain_get() segfaulted (reels-worker,
+// x8=0x135, null deref) and took the whole game down. It worked on warm
+// starts and died on cold ones: a race we can no longer lose.
 static void hooked_update(void* self) {
-    g_tramp(self);
-    menu_tick();
-    auto_grant_tick();
+    if (g_tramp) g_tramp(self);          // original Update first
+    if (!g_coreOk) g_coreOk = resolve_core();
+    if (g_coreOk) {
+        menu_tick();
+        auto_grant_tick();
+    }
 }
 
 // ------------------------------------------------------- trampoline placement
@@ -666,6 +682,11 @@ static void* mmap_near(uintptr_t near, size_t len) {
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (p == MAP_FAILED) ? nullptr : p;
 }
+
+// Address the hook was actually installed at - cross-checked against the
+// MethodInfo the runtime reports, so an RVA mistake shows up in logcat
+// instead of silently doing nothing.
+static void* g_hookTarget = nullptr;
 
 static bool install_hook(void* target) {
     uint32_t* t = (uint32_t*)target;
@@ -776,6 +797,19 @@ static bool install_hook(void* target) {
         LOGE("mprotect RW failed: %s", strerror(errno));
         return false;
     }
+    // Everything the target needs must be ready BEFORE the patch lands: the
+    // instant those 16 bytes are overwritten, the next Update jumps into
+    // hooked_update. Make the trampoline executable and publish g_tramp
+    // first, so there is no window where hooked_update runs against an
+    // RW-only page (bug #5) or a null trampoline.
+    if (mprotect(page, 4096, PROT_READ | PROT_EXEC) != 0) {
+        LOGE("mprotect trampoline RX failed: %s", strerror(errno));
+        munmap(page, 4096);
+        return false;
+    }
+    g_tramp = (UpdateFn)page;
+    g_hookTarget = target;
+
     memcpy(t, patch, sizeof(patch));
 
     // Trampoline can be ~44 bytes (an ADRP expands to 4 words) - flush a
@@ -783,19 +817,10 @@ static bool install_hook(void* target) {
     __builtin___clear_cache((char*)page, (char*)page + 256);
     __builtin___clear_cache((char*)target, (char*)target + 16);
 
-    // The trampoline page was mmap'd RW. It MUST become executable before
-    // the first jump into it, otherwise the first hooked Update dies with
-    // SEGV_ACCERR at the page start (crash: hooked_update -> <anonymous>).
-    if (mprotect(page, 4096, PROT_READ | PROT_EXEC) != 0) {
-        LOGE("mprotect trampoline RX failed: %s", strerror(errno));
-        return false;
-    }
-
     if (mprotect((void*)tpage, tlen, PROT_READ | PROT_EXEC) != 0) {
         LOGE("mprotect RX restore failed: %s", strerror(errno));
     }
 
-    g_tramp = (UpdateFn)page;
     LOGI("hook installed: target=%p tramp=%p delta=%lldB",
          target, page, (long long)((uintptr_t)page - oldpc));
     return true;
@@ -810,12 +835,13 @@ static bool resolve_core() {
     }
 
     if (!g_domain) {
-        // Don't poke il2cpp at all during the first seconds of startup -
-        // domain_get/thread_attach on a half-initialized VM segfaults the
-        // game (crash we hit: SIGSEGV at ~0x135, frames worker -> libil2cpp).
+        // We are called from hooked_update - i.e. already inside managed
+        // VRFishGame.Update - so il2cpp is up by construction. The short
+        // warm-up below is only belt-and-braces for a hypothetical early
+        // first frame; the real gate is the stable assembly count.
         struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
         int64_t nowMs = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-        if (nowMs - firstProbeAtMs < 4000) return false;
+        if (nowMs - firstProbeAtMs < 1000) return false;
 
         void* d = api.domain_get();
         if (!d) return false;
@@ -845,6 +871,16 @@ static bool resolve_core() {
 
     mUpdate = find_method(kVRFishGame, "Update", 0);
     if (!mUpdate) { LOGE("VRFishGame.Update not found"); return false; }
+
+    // Confirm the RVA we patched from is the method the runtime reports.
+    if (g_hookTarget && *(void**)mUpdate) {
+        void* mp = *(void**)mUpdate;
+        if ((uintptr_t)mp == (uintptr_t)g_hookTarget)
+            LOGI("RVA cross-check OK: hooked %p == runtime Update", mp);
+        else
+            LOGE("RVA cross-check MISMATCH: hooked %p, runtime says %p",
+                 g_hookTarget, mp);
+    }
 
     kGameProgression = find_class("VRFish.Gameplay", "GameProgression");
     kPlayerProfile   = find_class("VRFish.Gameplay", "PlayerProfile");
@@ -938,6 +974,22 @@ static bool resolve_core() {
     return true;
 }
 
+// First (lowest) mapping of `lib` in this process - fallback when dladdr
+// cannot tell us where libil2cpp landed.
+static uintptr_t map_base_of(const char* lib) {
+    FILE* f = fopen("/proc/self/maps", "r");
+    if (!f) return 0;
+    char line[512];
+    uintptr_t base = 0;
+    while (fgets(line, sizeof(line), f)) {
+        if (!strstr(line, lib)) continue;
+        uintptr_t a = (uintptr_t)strtoul(line, nullptr, 16);
+        if (!base || a < base) base = a;
+    }
+    fclose(f);
+    return base;
+}
+
 // ---------------------------------------------------------------- worker
 static void* worker(void*) {
     pthread_setname_np(pthread_self(), "reels-worker");
@@ -975,15 +1027,22 @@ static void* worker(void*) {
     RESOLVE(method_get_name, "il2cpp_method_get_name");
 #undef RESOLVE
 
-    for (int i = 0; i < 600; i++) {
-        if (resolve_core()) break;
-        if (i == 599) { LOGE("resolve_core never succeeded"); return nullptr; }
-        usleep(200000);
-    }
+    // ---- install the hook with NO il2cpp calls (bug #7) ------------------
+    // Everything il2cpp-related now happens inside hooked_update, which only
+    // runs from managed VRFishGame.Update on the attached UnityMain thread.
+    // Here we just need the address: load base + the verified RVA of
+    // VRFishGame.Update (tools/game/libil2cpp.so @ 0x6F7BCD4 =
+    // A9BE57FE A9014FF4 90009DB4 AA0003F3). install_hook re-checks those
+    // prologue bytes before patching, so a wrong RVA aborts instead of
+    // corrupting the game.
+    void* base = nullptr;
+    Dl_info info;
+    if (dladdr((void*)api.domain_get, &info) && info.dli_fbase) base = info.dli_fbase;
+    if (!base) base = (void*)map_base_of("/libil2cpp.so");
+    if (!base) { LOGE("cannot determine libil2cpp load base"); return nullptr; }
 
-    void* target = *(void**)mUpdate;   // methodPointer is the first field of MethodInfo
-    if (!target) { LOGE("Update methodPointer null"); return nullptr; }
-    LOGI("VRFishGame.Update @ %p", target);
+    void* target = (void*)((uintptr_t)base + 0x6F7BCD4);
+    LOGI("libil2cpp base %p -> VRFishGame.Update @ %p (RVA 0x6F7BCD4)", base, target);
 
     if (!install_hook(target)) return nullptr;
 
