@@ -601,14 +601,38 @@ static bool install_hook(void* target) {
     uint32_t ins[4];
     memcpy(ins, t, sizeof(ins));
 
-    if (ins[0] != 0xD10103FFu) {
+    // Prologue of VRFishGame.Update in this build, verified against
+    // tools/game/libil2cpp.so at RVA 0x6F7BCD4:
+    //   stp  x30, x21, [sp, #-32]!
+    //   stp  x20, x19, [sp, #16]
+    //   adrp x20, ...
+    //   mov  x19, x0
+    // (A9BE57FE A9014FF4 90009DB4 AA0003F3)
+    // The old check demanded `sub sp, sp, #imm` (0xD10103FF) plus a PC-rel
+    // instruction at slot 3 - neither exists here, so install_hook always
+    // aborted with "unexpected bytes" and the menu never appeared.
+    auto is_stp_to_sp = [](uint32_t i) {
+        return (i & 0xFF0003E0u) == 0xA90003E0u;   // 64-bit STP, Rn = sp
+    };
+    bool ok = is_stp_to_sp(ins[0]) && is_stp_to_sp(ins[1]) &&
+              (ins[2] & 0x9F000000u) == 0x90000000u &&   // ADRP (relocatable)
+              !is_pcrel(ins[3]);                          // plain ALU / mov
+    if (!ok) {
         LOGE("hook abort: unexpected bytes %08X %08X %08X %08X", ins[0], ins[1], ins[2], ins[3]);
         return false;
     }
-    for (int i = 0; i < 3; i++) {
-        if (is_pcrel(ins[i])) { LOGE("hook abort: PC-rel at insn %d", i); return false; }
+    // relocate() understands ADR / ADRP / LDR-literal only. A PC-rel branch
+    // in the first 4 instructions would be copied verbatim into the
+    // trampoline and jump to a wrong address, so refuse it up front.
+    for (int i = 0; i < 4; i++) {
+        if (is_pcrel(ins[i]) &&
+            !((ins[i] & 0x9F000000u) == 0x90000000u ||   // ADRP
+              (ins[i] & 0x1F000000u) == 0x10000000u ||   // ADR
+              (ins[i] & 0x3B000000u) == 0x18000000u)) {  // LDR literal
+            LOGE("hook abort: unrelocatable PC-rel insn %d (%08X)", i, ins[i]);
+            return false;
+        }
     }
-    if (!is_pcrel(ins[3])) { LOGE("hook abort: expected PC-rel at insn 3"); return false; }
 
     void* page = mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -627,13 +651,24 @@ static bool install_hook(void* target) {
     patch[1] = 0xD61F0200u;                    // br  x16
     *(uint64_t*)(patch + 2) = (uint64_t)&hooked_update;
 
+    // libil2cpp's text segment is mapped r-x. Writing the patch without
+    // mprotect first is a guaranteed SIGSEGV. Make the target page(s) RW
+    // (prefer RWX, fall back to RW), write, then restore r-x.
+    uintptr_t tpage = (uintptr_t)target & ~(uintptr_t)0xFFF;
+    uintptr_t toff  = (uintptr_t)target & 0xFFF;
+    size_t tlen = 4096 + ((toff + sizeof(patch) > 4096) ? 4096 : 0);  // patch can straddle
+    if (mprotect((void*)tpage, tlen, PROT_READ | PROT_WRITE | PROT_EXEC) != 0 &&
+        mprotect((void*)tpage, tlen, PROT_READ | PROT_WRITE) != 0) {
+        LOGE("mprotect RW failed: %s", strerror(errno));
+        return false;
+    }
     memcpy(t, patch, sizeof(patch));
 
     __builtin___clear_cache((char*)page, (char*)page + 32);
     __builtin___clear_cache((char*)target, (char*)target + 16);
 
-    if (mprotect(page, 4096, PROT_READ | PROT_EXEC) != 0) {
-        LOGE("mprotect RX failed (staying RWX): %s", strerror(errno));
+    if (mprotect((void*)tpage, tlen, PROT_READ | PROT_EXEC) != 0) {
+        LOGE("mprotect RX restore failed: %s", strerror(errno));
     }
 
     g_tramp = (UpdateFn)page;
