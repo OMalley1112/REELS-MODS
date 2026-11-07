@@ -45,7 +45,7 @@ Two possible engines, both need the game files first:
 
 ## Files
 
-- `native/`  - in-game injector source (`injector.cpp`, `repack.ps1`)
+- `native/`  - in-game injector source (`injector.cpp`, `repack.ps1`, `repack_zip.py`)
 - `unity/`   - standalone Reel Mods Quest app source
 - `docs/`    - ENGINE / MENU / CONTROLS / GET-IN-GAME / INJECTION
 - `tools/`   - dumper + pulled game files (git-ignored, derived)

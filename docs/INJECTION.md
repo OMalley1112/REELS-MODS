@@ -63,12 +63,16 @@ clang++.exe -target aarch64-linux-android31 -shared -fPIC -O2 -std=c++17 `
   "-Wl,-soname,libmain.so" "-Wl,--no-undefined"
 
 # 2. repack the game APK (rename original, patch its SONAME, add ours, align, sign)
+#    needs Python 3 on PATH: the zip rewrite lives in repack_zip.py
 powershell -ExecutionPolicy Bypass -File repack.ps1
 #    -> ..\tools\game\Reel-modded.apk
 ```
 
-`repack.ps1` blanks the original lib's `DT_SONAME` so `dlopen("libmain_real.so")`
-can't collide with our wrapper's soname.
+`repack_zip.py` (called by `repack.ps1`) blanks the original lib's `DT_SONAME`
+so `dlopen("libmain_real.so")` can't collide with our wrapper's soname, and it
+**preserves each entry's compression method** — `resources.arsc` must stay
+STORED or Android refuses the install with `-124` (`.NET Framework's ZipArchive
+cannot emit STORED entries`, which is why this step is Python).
 
 ## Install
 

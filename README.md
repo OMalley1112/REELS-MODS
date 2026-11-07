@@ -30,8 +30,12 @@ Download the APK from **[Releases](https://github.com/OMalley1112/REELS-MODS/rel
 and put it on the headset:
 
 ```
-adb install -r Reel-Mods-0.2.2.apk
+adb install -r Reel-Mods-0.2.3.apk
 ```
+
+> **0.2.2 would not open** (Unity injects `UnityPlayerActivity` with no
+> `MAIN`/`LAUNCHER` intent-filter, so the APK had no launchable activity).
+> Fixed in 0.2.3 — download the latest release.
 
 Then **Library → filter icon → Unknown Sources → Reel Mods**.
 
@@ -51,14 +55,15 @@ straight into the game after1.5s.
 | Step | State |
 |---|---|
 | Repo + plan + docs | done |
-| Standalone menu APK, installs and runs on Quest | **done — v0.2.2** |
-| One-tap launch of Reel from inside the menu | **done — v0.2.2** |
-| Quest connected / Developer Mode | waiting on you |
-| Pull Reel APK | blocked (needs headset) |
-| Detect IL2CPP vs Mono | blocked |
-| Dump coin / bundle / rod code | blocked |
-| Wire the REELS toggles to the real game | blocked |
-| Install inside Reel | blocked |
+| Standalone menu APK, installs and runs on Quest | **done — v0.2.3** |
+| One-tap launch of Reel from inside the menu | **done — v0.2.3** |
+| In-game injection (wrapped `libmain.so`, X opens REELS MODS) | **done — source + docs, device test pending** |
+| Quest connected / Developer Mode | done |
+| Pull Reel APK | done (`tools/game/Reel.apk`, git-ignored) |
+| Detect IL2CPP vs Mono | done — IL2CPP |
+| Dump coin / bundle / rod code | done (`tools/dumper/output/dump.cs`, git-ignored) |
+| Wire the REELS toggles to the real game | Give Coins/XPMedals/Candy write `PlayerProfile` fields; server rollback untested |
+| Install inside Reel | **done — repack signs clean; 0.2.3-era `resources.arsc` fix included** |
 
 The REELS rows switch state and toast correctly today. They are **not yet
 writing Reel's wallet** — that needs the game APK pulled and its IL2CPP
