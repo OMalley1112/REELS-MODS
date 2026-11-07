@@ -24,6 +24,10 @@
 #include <sys/mman.h>
 #include <android/log.h>
 
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
+
 #define TAG "REELS_MODS"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
@@ -627,6 +631,74 @@ static void hooked_update(void* self) {
     auto_grant_tick();
 }
 
+// ------------------------------------------------------- trampoline placement
+// Bug #6: the trampoline was mmap'd wherever the kernel wanted (~8 GB away
+// from libil2cpp). The relocated `adrp x20` then needed an immediate of
+// +/-8 GB, but ADRP only encodes +/-4 GB, so the low bit overflowed and x20
+// came back page-aligned garbage -> first instruction after the trampoline
+// returned died (SIGSEGV SEGV_MAPERR, pc = target+16, x20 = 0x...f000).
+// Allocate the page CLOSE to the target instead, and refuse the hook if any
+// relocated PC-relative instruction would still be out of range.
+static void* mmap_near(uintptr_t near, size_t len) {
+    uintptr_t base = near & ~(uintptr_t)0xFFF;
+    // Walk outward from the target so the ADRP/ADR immediates stay tiny.
+    static const uintptr_t kOff[] = {
+        0x100000, 0x200000, 0x400000, 0x800000, 0x1000000, 0x2000000,
+        0x4000000, 0x8000000, 0x10000000, 0x20000000, 0x40000000, 0x70000000,
+    };
+    for (size_t i = 0; i < sizeof(kOff) / sizeof(kOff[0]); i++) {
+        uintptr_t cands[2] = { base + kOff[i], base - kOff[i] };
+        for (int c = 0; c < 2; c++) {
+            uintptr_t a = cands[c] & ~(uintptr_t)0xFFF;
+            if (a < 0x10000000 || a > 0x7FFFFFFFFFFFull) continue;
+            void* p = mmap((void*)a, len, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+            if (p != MAP_FAILED) return p;
+            // MAP_FIXED_NOREPLACE unsupported (old kernel) -> plain hint.
+            if (errno == EINVAL) {
+                p = mmap((void*)a, len, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                if (p != MAP_FAILED && (uintptr_t)p == a) return p;
+                if (p != MAP_FAILED) munmap(p, len);
+            }
+        }
+    }
+    void* p = mmap(nullptr, len, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    return (p == MAP_FAILED) ? nullptr : p;
+}
+
+// Decode an ADR/ADRP/LDR-literal back to its absolute target so we can prove
+// the relocated copy still reaches the same address.
+static bool reloc_reaches(uint32_t ins, uintptr_t oldpc, uintptr_t newpc) {
+    if ((ins & 0x9F000000u) == 0x90000000u) {                 // ADRP
+        int64_t imm = (int64_t)((((ins >> 5) & 0x7FFFF) << 2) | ((ins >> 29) & 3));
+        imm = (imm << 43) >> 43;
+        uintptr_t tgt = (oldpc & ~0xFFFULL) + ((uintptr_t)imm << 12);
+        int64_t nimm = ((int64_t)(tgt - (newpc & ~0xFFFULL))) >> 12;
+        if (nimm < -(1 << 20) || nimm > ((1 << 20) - 1)) return false;
+        uintptr_t back = (newpc & ~0xFFFULL) + ((uintptr_t)nimm << 12);
+        return back == tgt;
+    }
+    if ((ins & 0x1F000000u) == 0x10000000u) {                 // ADR
+        int64_t imm = (int64_t)((((ins >> 5) & 0x7FFFF) << 2) | ((ins >> 29) & 3));
+        imm = (imm << 43) >> 43;
+        int64_t tgt = (int64_t)oldpc + imm;
+        int64_t nimm = tgt - (int64_t)newpc;
+        if (nimm < -(1 << 20) || nimm > ((1 << 20) - 1)) return false;
+        return (int64_t)newpc + nimm == tgt;
+    }
+    if ((ins & 0x3B000000u) == 0x18000000u) {                 // LDR literal
+        int64_t imm = (int64_t)((ins >> 5) & 0x7FFFF);
+        imm = (imm << 45) >> 45;
+        int64_t tgt = (int64_t)oldpc + (imm << 2);
+        int64_t nimm = (tgt - (int64_t)newpc) >> 2;
+        if (nimm < -(1 << 19) || nimm > ((1 << 19) - 1)) return false;
+        return (int64_t)newpc + (nimm << 2) == tgt;
+    }
+    return true;
+}
+
 static bool install_hook(void* target) {
     uint32_t* t = (uint32_t*)target;
     uint32_t ins[4];
@@ -665,12 +737,23 @@ static bool install_hook(void* target) {
         }
     }
 
-    void* page = mmap(nullptr, 4096, PROT_READ | PROT_WRITE,
-                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (page == MAP_FAILED) { LOGE("mmap failed: %s", strerror(errno)); return false; }
-
     uintptr_t oldpc = (uintptr_t)target;
+    // Close to libil2cpp: every relocated PC-relative immediate must fit.
+    void* page = mmap_near(oldpc, 4096);
+    if (!page) { LOGE("mmap_near failed near %p", target); return false; }
     uintptr_t newpc = (uintptr_t)page;
+
+    // Hard gate: if any of the 4 moved instructions still cannot reach from
+    // the trampoline, do NOT patch - a half-relocated hook = guaranteed crash.
+    for (int i = 0; i < 4; i++) {
+        if (is_pcrel(ins[i]) && !reloc_reaches(ins[i], oldpc + i * 4, newpc + i * 4)) {
+            LOGE("hook abort: insn %d (%08X) out of range from tramp %p (delta %lld)",
+                 i, ins[i], page, (long long)(newpc - oldpc));
+            munmap(page, 4096);
+            return false;
+        }
+    }
+
     uint32_t* tr = (uint32_t*)page;
     for (int i = 0; i < 4; i++) tr[i] = relocate(ins[i], oldpc + i * 4, newpc + i * 4);
     tr[4] = 0x58000050u;   // ldr x16, [pc, #8]
