@@ -413,8 +413,7 @@ static bool build_menu() {
         void* panelGO = inv(mCreatePrimitive, nullptr, &pt);
         if (panelGO) {
             void* tr = inv(mGetTransform, panelGO);
-            bool f = false;
-            inv(mSetParent, tr, camTr, &f);
+            inv(mSetParent, tr, camTr);
             set_tr(tr, 0.0f, -0.02f, 1.45f, 0.95f, 0.62f, 1.0f);
             void* colType = typeof_k(kCollider);
             if (colType && mDestroy) {
@@ -454,8 +453,7 @@ static bool build_menu() {
         inv(mSetRenderMode, canvasComp, &mode);
     }
     void* cTr = inv(mGetTransform, canvasGO);
-    bool f = false;
-    inv(mSetParent, cTr, camTr, &f);
+    inv(mSetParent, cTr, camTr);
     set_tr(cTr, 0.0f, -0.02f, 1.4f, 0.01f, 0.01f, 0.01f);
 
     // ---- text ----
@@ -463,7 +461,7 @@ static bool build_menu() {
     void* textGO = new_go_types("reels_mods_text", textTypes, 1);
     if (!textGO) return false;
     void* tTr = inv(mGetTransform, textGO);
-    inv(mSetParent, tTr, cTr, &f);
+    inv(mSetParent, tTr, cTr);
     set_tr(tTr, 0.0f, 0.0f, 0.01f, 1.0f, 1.0f, 1.0f);
 
     void* tmpType = typeof_k(kTMPText);
@@ -736,7 +734,12 @@ static bool resolve_core() {
     mAddComponent    = find_method(kGameObject, "AddComponent", 1);
     mGetComponent    = find_method(kGameObject, "GetComponent", 1);
     mSetActive       = find_method(kGameObject, "SetActive", 1);
-    mSetParent       = find_method(kTransform, "set_parent", 2);
+    // set_parent has only the 1-arg overload in this game
+    // (dump: `public void set_parent(Transform value)`) - the 2-arg
+    // worldPositionStays form doesn't exist, and asking for it left this
+    // resolve permanently incomplete, so the hook/menu never installed.
+    mSetParent       = find_method(kTransform, "set_parent", 1);
+    if (!mSetParent) mSetParent = find_method(kTransform, "set_parent", 2);
     mSetLocalPos     = find_method(kTransform, "set_localPosition", 1);
     mSetLocalRot     = find_method(kTransform, "set_localRotation", 1);
     mSetLocalScale   = find_method(kTransform, "set_localScale", 1);
@@ -759,11 +762,15 @@ static bool resolve_core() {
         !mSetLocalRot || !mSetLocalScale || !mSetRenderMode || !mSetText || !mSetFontSize ||
         !mSetColor || !mSetAlignment || !mSetFont || !mGetDefaultFont || !mDestroy ||
         !mSetAnchorMin || !mSetAnchorMax || !mSetSizeDelta) {
-        LOGE("method resolve incomplete: keydown=%p camp=%p gettr=%p prim=%p ctor2=%p addc=%p getc=%p setact=%p setpar=%p setpos=%p setrot=%p setscl=%p setrm=%p settext=%p setfs=%p setcol=%p setal=%p setfont=%p getfont=%p destroy=%p anchmin=%p anchmax=%p sizedelta=%p",
-             mGetKeyDown, mCamMain, mGetTransform, mCreatePrimitive, mGoCtorTypes, mAddComponent,
-             mGetComponent, mSetActive, mSetParent, mSetLocalPos, mSetLocalRot, mSetLocalScale,
-             mSetRenderMode, mSetText, mSetFontSize, mSetColor, mSetAlignment, mSetFont,
-             mGetDefaultFont, mDestroy, mSetAnchorMin, mSetAnchorMax, mSetSizeDelta);
+        // throttled: resolve retries every 200ms, don't flood logcat
+        static int failCount = 0;
+        if (failCount++ % 50 == 0) {
+            LOGE("method resolve incomplete (try %d): keydown=%p camp=%p gettr=%p prim=%p ctor2=%p addc=%p getc=%p setact=%p setpar=%p setpos=%p setrot=%p setscl=%p setrm=%p settext=%p setfs=%p setcol=%p setal=%p setfont=%p getfont=%p destroy=%p anchmin=%p anchmax=%p sizedelta=%p",
+                 failCount, mGetKeyDown, mCamMain, mGetTransform, mCreatePrimitive, mGoCtorTypes, mAddComponent,
+                 mGetComponent, mSetActive, mSetParent, mSetLocalPos, mSetLocalRot, mSetLocalScale,
+                 mSetRenderMode, mSetText, mSetFontSize, mSetColor, mSetAlignment, mSetFont,
+                 mGetDefaultFont, mDestroy, mSetAnchorMin, mSetAnchorMax, mSetSizeDelta);
+        }
         return false;
     }
 
