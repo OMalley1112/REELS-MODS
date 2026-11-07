@@ -20,6 +20,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <android/log.h>
 
@@ -644,11 +645,41 @@ static bool install_hook(void* target) {
 
 // ---------------------------------------------------------------- resolve
 static bool resolve_core() {
+    static int64_t firstProbeAtMs = 0;
+    if (!firstProbeAtMs) {
+        struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+        firstProbeAtMs = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+    }
+
     if (!g_domain) {
-        g_domain = api.domain_get();
-        if (!g_domain) return false;
-        api.thread_attach(g_domain);
-        LOGI("il2cpp domain ready");
+        // Don't poke il2cpp at all during the first seconds of startup -
+        // domain_get/thread_attach on a half-initialized VM segfaults the
+        // game (crash we hit: SIGSEGV at ~0x135, frames worker -> libil2cpp).
+        struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+        int64_t nowMs = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+        if (nowMs - firstProbeAtMs < 4000) return false;
+
+        void* d = api.domain_get();
+        if (!d) return false;
+
+        // il2cpp_domain_get() can return a domain before il2cpp_init() has
+        // finished. Attaching our thread at that point SIGSEGVs inside
+        // libil2cpp (null deref ~0x135, backtrace worker -> libil2cpp) and
+        // takes the whole game down. Assemblies only show up once the
+        // metadata is in, so wait until the count is non-zero AND stable
+        // across polls before we attach.
+        size_t n = 0;
+        const void** asms = api.domain_get_assemblies(d, &n);
+        if (!asms || n == 0 || n > 4096) return false;
+
+        static int lastCount = -1;
+        static int stablePolls = 0;
+        if ((int)n != lastCount) { lastCount = (int)n; stablePolls = 0; return false; }
+        if (++stablePolls < 3) return false;   // ~600ms of unchanged count
+
+        api.thread_attach(d);
+        g_domain = d;
+        LOGI("il2cpp domain ready: %zu assemblies", n);
     }
 
     kVRFishGame = find_class("VRFish.Game", "VRFishGame");
