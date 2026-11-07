@@ -156,12 +156,28 @@ immediate of `+/-8 GB` - but ADRP only carries `+/-4 GB`. The value
 overflowed, `x20` came back garbage, and the first instruction that used
 it died. Distance, not permissions, was the problem.
 
-`install_hook` now:
+`mmap_near(target)` was tried first (walking outward from the target with
+`MAP_FIXED_NOREPLACE`), but on device the library region was packed: every
+candidate inside 1.7 GB was taken and the hook aborted with
 
-* allocates with `mmap_near(target)` - walks outward from the target
-  (1 MB .. 1.7 GB) using `MAP_FIXED_NOREPLACE`, falling back to a hint
-  mapping and finally a plain one, so the delta is a few MB at most;
-* re-decodes every moved ADR/ADRP/LDR-literal via `reloc_reaches()` and
-  **aborts the hook** (`munmap`, no patch) if it would be out of range -
-  a half-relocated hook is a guaranteed crash, so no hook beats a crash;
-* logs the trampoline delta when it does abort, for diagnosis.
+`hook abort: insn 2 (90009DB4) out of range from tramp ... (delta 4813402924)`
+
+which is the same bug wearing a different hat. Trying to *place* the
+trampoline in range was the wrong fix - the right one is to stop being
+PC-relative at all.
+
+The trampoline now rewrites the 4 displaced instructions as
+**position-independent** code: each ADR/ADRP/LDR-literal is expanded into
+
+`
+  ldr  xd, [pc, #8]     ; load the absolute target
+  b    +3               ; hop over its own literal
+  .quad <absolute addr>
+`
+
+and integer LDR-literal additionally becomes an unsigned-offset load off
+`x16` (`PRFM` is dropped, FP/SIMD literals are refused up front because
+they are not decoded). No instruction in the trampoline encodes a
+distance, so the page can be anywhere - the remaining `mmap_near` is only
+a cache-locality nicety, and its plain-`mmap` fallback is fine. The log
+now prints the trampoline delta either way.

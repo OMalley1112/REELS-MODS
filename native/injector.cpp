@@ -569,30 +569,29 @@ static bool is_pcrel(uint32_t ins) {
     return false;
 }
 
-static uint32_t relocate(uint32_t ins, uintptr_t oldpc, uintptr_t newpc) {
-    if ((ins & 0x9F000000) == 0x90000000) {                          // ADRP
+// Absolute address a PC-relative instruction refers to. Used to REWRITE those
+// instructions as position-independent code, so the trampoline may live
+// anywhere in the address space (see hooked_update trampoline notes).
+static bool pcrel_target(uint32_t ins, uintptr_t pc, uint64_t* out) {
+    if ((ins & 0x9F000000u) == 0x90000000u) {                      // ADRP
         int64_t imm = (int64_t)((((ins >> 5) & 0x7FFFF) << 2) | ((ins >> 29) & 3));
         imm = (imm << 43) >> 43;
-        uintptr_t tgt = (oldpc & ~0xFFFULL) + ((uintptr_t)imm << 12);
-        int64_t nimm = ((int64_t)(tgt - (newpc & ~0xFFFULL))) >> 12;
-        uint32_t rd = ins & 0x1F;
-        return 0x90000000u | ((uint32_t)(nimm & 3) << 29) | (((uint32_t)(nimm >> 2) & 0x7FFFF) << 5) | rd;
+        *out = (uint64_t)((pc & ~0xFFFULL) + ((uintptr_t)imm << 12));
+        return true;
     }
-    if ((ins & 0x1F000000) == 0x10000000) {                          // ADR
+    if ((ins & 0x1F000000u) == 0x10000000u) {                      // ADR
         int64_t imm = (int64_t)((((ins >> 5) & 0x7FFFF) << 2) | ((ins >> 29) & 3));
         imm = (imm << 43) >> 43;
-        int64_t nimm = (int64_t)((intptr_t)oldpc + imm - (intptr_t)newpc);
-        uint32_t rd = ins & 0x1F;
-        return 0x10000000u | ((uint32_t)(nimm & 3) << 29) | (((uint32_t)(nimm >> 2) & 0x7FFFF) << 5) | rd;
+        *out = (uint64_t)((int64_t)pc + imm);
+        return true;
     }
-    if ((ins & 0x3B000000) == 0x18000000) {                          // LDR literal
+    if ((ins & 0x3B000000u) == 0x18000000u) {                      // LDR literal
         int64_t imm = (int64_t)((ins >> 5) & 0x7FFFF);
         imm = (imm << 45) >> 45;
-        uintptr_t tgt = (uintptr_t)oldpc + (uintptr_t)(imm << 2);
-        int64_t nimm = ((int64_t)((intptr_t)tgt - (intptr_t)newpc)) >> 2;
-        return (ins & 0xFF00001F) | (((uint32_t)nimm & 0x7FFFF) << 5);
+        *out = (uint64_t)((int64_t)pc + (imm << 2));
+        return true;
     }
-    return ins;
+    return false;
 }
 
 // ---------------------------------------------------------------- auto grant
@@ -668,37 +667,6 @@ static void* mmap_near(uintptr_t near, size_t len) {
     return (p == MAP_FAILED) ? nullptr : p;
 }
 
-// Decode an ADR/ADRP/LDR-literal back to its absolute target so we can prove
-// the relocated copy still reaches the same address.
-static bool reloc_reaches(uint32_t ins, uintptr_t oldpc, uintptr_t newpc) {
-    if ((ins & 0x9F000000u) == 0x90000000u) {                 // ADRP
-        int64_t imm = (int64_t)((((ins >> 5) & 0x7FFFF) << 2) | ((ins >> 29) & 3));
-        imm = (imm << 43) >> 43;
-        uintptr_t tgt = (oldpc & ~0xFFFULL) + ((uintptr_t)imm << 12);
-        int64_t nimm = ((int64_t)(tgt - (newpc & ~0xFFFULL))) >> 12;
-        if (nimm < -(1 << 20) || nimm > ((1 << 20) - 1)) return false;
-        uintptr_t back = (newpc & ~0xFFFULL) + ((uintptr_t)nimm << 12);
-        return back == tgt;
-    }
-    if ((ins & 0x1F000000u) == 0x10000000u) {                 // ADR
-        int64_t imm = (int64_t)((((ins >> 5) & 0x7FFFF) << 2) | ((ins >> 29) & 3));
-        imm = (imm << 43) >> 43;
-        int64_t tgt = (int64_t)oldpc + imm;
-        int64_t nimm = tgt - (int64_t)newpc;
-        if (nimm < -(1 << 20) || nimm > ((1 << 20) - 1)) return false;
-        return (int64_t)newpc + nimm == tgt;
-    }
-    if ((ins & 0x3B000000u) == 0x18000000u) {                 // LDR literal
-        int64_t imm = (int64_t)((ins >> 5) & 0x7FFFF);
-        imm = (imm << 45) >> 45;
-        int64_t tgt = (int64_t)oldpc + (imm << 2);
-        int64_t nimm = (tgt - (int64_t)newpc) >> 2;
-        if (nimm < -(1 << 19) || nimm > ((1 << 19) - 1)) return false;
-        return (int64_t)newpc + (nimm << 2) == tgt;
-    }
-    return true;
-}
-
 static bool install_hook(void* target) {
     uint32_t* t = (uint32_t*)target;
     uint32_t ins[4];
@@ -724,9 +692,11 @@ static bool install_hook(void* target) {
         LOGE("hook abort: unexpected bytes %08X %08X %08X %08X", ins[0], ins[1], ins[2], ins[3]);
         return false;
     }
-    // relocate() understands ADR / ADRP / LDR-literal only. A PC-rel branch
-    // in the first 4 instructions would be copied verbatim into the
-    // trampoline and jump to a wrong address, so refuse it up front.
+    // The trampoline rewrites ADR / ADRP / LDR-literal as position-
+    // independent code. A PC-rel *branch* in the first 4 instructions cannot
+    // be rewritten that way (its destination is code, not a constant we can
+    // materialise safely), so refuse it up front - and refuse FP/SIMD
+    // literals too, which we do not decode.
     for (int i = 0; i < 4; i++) {
         if (is_pcrel(ins[i]) &&
             !((ins[i] & 0x9F000000u) == 0x90000000u ||   // ADRP
@@ -735,30 +705,60 @@ static bool install_hook(void* target) {
             LOGE("hook abort: unrelocatable PC-rel insn %d (%08X)", i, ins[i]);
             return false;
         }
-    }
-
-    uintptr_t oldpc = (uintptr_t)target;
-    // Close to libil2cpp: every relocated PC-relative immediate must fit.
-    void* page = mmap_near(oldpc, 4096);
-    if (!page) { LOGE("mmap_near failed near %p", target); return false; }
-    uintptr_t newpc = (uintptr_t)page;
-
-    // Hard gate: if any of the 4 moved instructions still cannot reach from
-    // the trampoline, do NOT patch - a half-relocated hook = guaranteed crash.
-    for (int i = 0; i < 4; i++) {
-        if (is_pcrel(ins[i]) && !reloc_reaches(ins[i], oldpc + i * 4, newpc + i * 4)) {
-            LOGE("hook abort: insn %d (%08X) out of range from tramp %p (delta %lld)",
-                 i, ins[i], page, (long long)(newpc - oldpc));
-            munmap(page, 4096);
+        if ((ins[i] & 0x3F000000u) == 0x1C000000u) {     // FP/SIMD literal (V=1)
+            LOGE("hook abort: FP literal at slot %d (%08X)", i, ins[i]);
             return false;
         }
     }
 
+    uintptr_t oldpc = (uintptr_t)target;
+    // Proximity is only a nicety now (bug #6 fix below makes distance
+    // irrelevant); mmap_near falls back to any free page if it finds none.
+    void* page = mmap_near(oldpc, 4096);
+    if (!page) { LOGE("mmap_near failed near %p", target); return false; }
+
+    // Rewrite the 4 displaced instructions as POSITION-INDEPENDENT code.
+    // Bug #6: re-encoding them relative to the trampoline's own PC needs an
+    // ADRP immediate of +/-4 GB, and mmap landed the trampoline 4.8 GB from
+    // libil2cpp - the immediate overflowed, x20 came back page-aligned
+    // garbage, and the first instruction after the return died. Rather than
+    // hunting for a page in range (there was none within 1.7 GB), each
+    // PC-relative target is materialised as an absolute 64-bit literal
+    // sitting right next to the instruction that needs it.
     uint32_t* tr = (uint32_t*)page;
-    for (int i = 0; i < 4; i++) tr[i] = relocate(ins[i], oldpc + i * 4, newpc + i * 4);
-    tr[4] = 0x58000050u;   // ldr x16, [pc, #8]
-    tr[5] = 0xD61F0200u;   // br  x16
-    *(uint64_t*)(tr + 6) = (uint64_t)(oldpc + 16);
+    int oi = 0;
+    for (int i = 0; i < 4; i++) {
+        uint32_t x = ins[i];
+        uintptr_t ipc = oldpc + (uintptr_t)i * 4;
+
+        if ((x & 0x9F000000u) == 0x90000000u ||              // ADRP
+            (x & 0x1F000000u) == 0x10000000u) {              // ADR
+            uint64_t abs = 0;
+            pcrel_target(x, ipc, &abs);
+            tr[oi++] = 0x58000040u | (x & 0x1Fu);            // ldr xd, [pc, #8]
+            tr[oi++] = 0x14000003u;                          // b over the literal
+            *(uint64_t*)(tr + oi) = abs; oi += 2;
+        } else if ((x & 0x3B000000u) == 0x18000000u) {       // integer LDR literal
+            uint32_t opc = (x >> 30) & 3u;
+            if (opc == 3u) continue;                         // PRFM: a hint, drop it
+            uint64_t abs = 0;
+            pcrel_target(x, ipc, &abs);
+            tr[oi++] = 0x58000050u;                          // ldr x16, [pc, #8] = addr
+            tr[oi++] = 0x14000003u;
+            *(uint64_t*)(tr + oi) = abs; oi += 2;
+            // literal opc -> unsigned-offset form: 00=W(size10,op01),
+            // 01=X(size11,op01), 10=LDRSW(size10,op10)
+            uint32_t sz  = (opc == 1u) ? 3u : 2u;
+            uint32_t op  = (opc == 2u) ? 2u : 1u;
+            tr[oi++] = (sz << 30) | 0x39000000u | (op << 22) |
+                       (16u << 5) | (x & 0x1Fu);
+        } else {
+            tr[oi++] = x;                                    // stp / mov / alu
+        }
+    }
+    tr[oi++] = 0x58000050u;   // ldr x16, [pc, #8]
+    tr[oi++] = 0xD61F0200u;   // br  x16
+    *(uint64_t*)(tr + oi) = (uint64_t)(oldpc + 16);
 
     uint32_t patch[4];
     patch[0] = 0x58000050u;                    // ldr x16, [pc, #8]
@@ -778,7 +778,9 @@ static bool install_hook(void* target) {
     }
     memcpy(t, patch, sizeof(patch));
 
-    __builtin___clear_cache((char*)page, (char*)page + 32);
+    // Trampoline can be ~44 bytes (an ADRP expands to 4 words) - flush a
+    // generous window so no stale i-cache line survives.
+    __builtin___clear_cache((char*)page, (char*)page + 256);
     __builtin___clear_cache((char*)target, (char*)target + 16);
 
     // The trampoline page was mmap'd RW. It MUST become executable before
@@ -794,7 +796,8 @@ static bool install_hook(void* target) {
     }
 
     g_tramp = (UpdateFn)page;
-    LOGI("hook installed: target=%p tramp=%p", target, page);
+    LOGI("hook installed: target=%p tramp=%p delta=%lldB",
+         target, page, (long long)((uintptr_t)page - oldpc));
     return true;
 }
 
