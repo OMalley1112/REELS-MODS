@@ -56,18 +56,25 @@ straight into the game after1.5s.
 |---|---|
 | Repo + plan + docs | done |
 | Standalone menu APK, installs and runs on Quest | **done — v0.2.4** |
-| One-tap launch of Reel from inside the menu | **done — v0.2.4** |
-| In-game injection (wrapped `libmain.so`, X opens REELS MODS) | **done — source + docs, device test pending** |
+| One-tap launch of Reel from inside the menu | **done — v0.2.4** (click fix landed in 0.2.4) |
+| In-game injection (wrapped `libmain.so`, X opens REELS MODS) | **built + installed on device; boot crash fixed (`a19e376`), verification pending** |
 | Quest connected / Developer Mode | done |
 | Pull Reel APK | done (`tools/game/Reel.apk`, git-ignored) |
 | Detect IL2CPP vs Mono | done — IL2CPP |
 | Dump coin / bundle / rod code | done (`tools/dumper/output/dump.cs`, git-ignored) |
 | Wire the REELS toggles to the real game | Give Coins/XPMedals/Candy write `PlayerProfile` fields; server rollback untested |
-| Install inside Reel | **done — repack signs clean; 0.2.3-era `resources.arsc` fix included** |
+| Install inside Reel | **done — repack signs clean, installs (773 STORED entries preserved)** |
 
-The REELS rows switch state and toast correctly today. They are **not yet
-writing Reel's wallet** — that needs the game APK pulled and its IL2CPP
-classes dumped. See `docs/GET-IN-GAME.md` for the step-by-step.
+Device log so far: wrapper loads, original `JNI_OnLoad` returns, libil2cpp
+found — then a SIGSEGV because our worker attached to the il2cpp thread
+before `il2cpp_init()` finished. Fixed: the worker now waits for the runtime
+(4 s warm-up + non-zero assembly count stable across 3 polls) before
+attaching. The expected healthy log ends with
+`REELS MODS ready - press X in game`.
+
+The REELS rows switch state and toast correctly in the standalone app.
+Whether the wallet writes survive a server sync is still untested on device.
+See `docs/GET-IN-GAME.md` for the step-by-step.
 
 ## Repo layout
 

@@ -88,5 +88,16 @@ adb logcat -s REELS_MODS
 ```
 
 Expected lines: `libmain wrapper loaded` → `original JNI_OnLoad returned ...`
-→ `il2cpp domain ready` → `core resolved OK` → `hook installed` →
+→ `il2cpp domain ready: N assemblies` → `core resolved OK` → `hook installed` →
 `REELS MODS ready - press X in game`.
+
+### Boot crash (fixed in `a19e376`)
+
+First device run died with `SIGSEGV` at fault `0x135`, frames
+`worker → libil2cpp`, shortly after `libil2cpp handle` appeared and with no
+`il2cpp domain ready` line: the worker called `il2cpp_thread_attach()` as
+soon as `il2cpp_domain_get()` returned — but that happens **before**
+`il2cpp_init()` finishes, and attaching to a half-initialized VM derefs
+null. The worker now probes nothing for the first 4 s, requires a non-zero
+assembly count that stays stable across 3 polls, and only then attaches.
+If you build from an older `injector.cpp`, expect Reel to crash on launch.
