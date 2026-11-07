@@ -698,6 +698,14 @@ static bool install_hook(void* target) {
     __builtin___clear_cache((char*)page, (char*)page + 32);
     __builtin___clear_cache((char*)target, (char*)target + 16);
 
+    // The trampoline page was mmap'd RW. It MUST become executable before
+    // the first jump into it, otherwise the first hooked Update dies with
+    // SEGV_ACCERR at the page start (crash: hooked_update -> <anonymous>).
+    if (mprotect(page, 4096, PROT_READ | PROT_EXEC) != 0) {
+        LOGE("mprotect trampoline RX failed: %s", strerror(errno));
+        return false;
+    }
+
     if (mprotect((void*)tpage, tlen, PROT_READ | PROT_EXEC) != 0) {
         LOGE("mprotect RX restore failed: %s", strerror(errno));
     }
