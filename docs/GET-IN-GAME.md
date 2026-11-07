@@ -4,7 +4,7 @@ Two different things, so don't mix them up:
 
 | | What it is | Status |
 |---|---|---|
-| **A. The menu app** | REELS MODS as its own Quest app (OPEN REEL button) | ✅ works, v0.2.4.5 on Releases |
+| **A. The menu app** | REELS MODS as its own Quest app (OPEN REEL button) | ✅ works, v0.2.5.0 on Releases |
 | **B. In-game mod** | REELS MODS inside Reel, opened with **X** | ✅ built — install the modded Reel (below) |
 
 This guide covers both. Part B is the one you actually want.
@@ -13,7 +13,7 @@ This guide covers both. Part B is the one you actually want.
 
 ## A. Install the menu app (2 minutes)
 
-1. Download `Reel-Mods-0.2.4.5.apk` from the Releases page.
+1. Download `Reel-Mods-0.2.5.0.apk` from the Releases page.
 2. Put the Quest on and enable **Developer Mode**:
    - Phone → **Meta Horizon app** → menu → **Settings** → **Devices** → your Quest → **Developer Mode** → ON
 3. Plug the Quest into the PC with the USB-C cable.
@@ -25,14 +25,14 @@ This guide covers both. Part B is the one you actually want.
    You must see a line ending in `device`, not `unauthorized` or nothing.
 6. Install:
    ```
-   adb install -r "C:\path\to\Reel-Mods-0.2.4.5.apk"
+   adb install -r "C:\path\to\Reel-Mods-0.2.5.0.apk"
    ```
 7. In the Quest: **Library → filter icon → Unknown Sources → Reel Mods**.
    (The in-panel title still reads **R E E L S   M O D S**.)
 8. Press **X** or **Y** on the left controller (or **A** / **B** on the right) to open the panel.
 9. Point the laser at **▶ OPEN REEL** and pull the trigger — Reel boots.
 
-> v0.2.4.5 fixed the click bug: tabs, the `<` `>` page arrows and OPEN REEL
+> v0.2.4 fixed the click bug: tabs, the `<` `>` page arrows and OPEN REEL
 > were dead in VR because the laser only recognized row components.
 
 ---
@@ -88,6 +88,6 @@ adb install -r ..\tools\game\Reel-modded.apk
 | `INSTALL_FAILED_UPDATE_INCOMPATIBLE` | signatures differ → `adb uninstall com.mostsanestudios.reel` first, then install |
 | App opens but no panel | press **X** or **Y**, not the trigger |
 | Panel visible but trigger does nothing | the laser needs a controller pose; make sure the controllers are awake (grab them) |
-| Tabs / page arrows / OPEN REEL don't click | update to **v0.2.4.5** — earlier builds only recognized row components |
+| Tabs / page arrows / OPEN REEL don't click | update to **v0.2.5.0** — earlier builds only recognized row components |
 | No menu inside Reel | Reel isn't the modded build — check `adb logcat -s REELS_MODS` prints `wrapper loaded` |
 | Menu opens inside Reel but coins don't change | economy is server-authoritative — see `docs/INJECTION.md` § persistence |
