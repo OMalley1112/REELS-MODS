@@ -101,3 +101,31 @@ soon as `il2cpp_domain_get()` returned — but that happens **before**
 null. The worker now probes nothing for the first 4 s, requires a non-zero
 assembly count that stays stable across 3 polls, and only then attaches.
 If you build from an older `injector.cpp`, expect Reel to crash on launch.
+
+### Menu never installed: `set_parent` has 1 arg (fixed in `7171337`)
+
+Next device run reached `il2cpp domain ready: 111 assemblies` but then
+looped on `method resolve incomplete: setpar=0x0` forever — no hook, no
+menu. Reel's `Transform` only exposes the 1-arg overload
+(`public void set_parent(Transform value)`, `dump.cs:947309`); we asked
+for `paramCount == 2`. The resolver now tries 1 arg first and falls back
+to 2.
+
+### Hook install would SIGSEGV + abort on the real prologue (fixed in `1a7fa64`)
+
+Found by static audit against `tools/game/libil2cpp.so` before it could
+fail on device:
+
+1. `install_hook` `memcpy`'d the 16-byte patch into libil2cpp's **r-x**
+   text page with no `mprotect` first — a guaranteed SIGSEGV. It now
+   makes the target page RW (RWX with RW fallback), writes, clears the
+   instruction cache, and restores r-x (handles a patch straddling a
+   page boundary).
+2. The prologue check demanded `ins[0] == 0xD10103FF` (`sub sp, sp, #imm`)
+   and a PC-rel instruction at slot 3. The real bytes at
+   `VRFishGame.Update` (RVA `0x6F7BCD4`) are `A9BE57FE A9014FF4 90009DB4
+   AA0003F3` — `stp / stp / adrp / mov` — so the hook would have aborted
+   with `unexpected bytes` even after the mprotect fix. Validation now
+   accepts 64-bit STP-to-sp prologues, requires a relocatable ADRP at
+   slot 2, a plain ALU/mov at slot 3, and refuses PC-rel branches
+   `relocate()` cannot rewrite (it handles ADR/ADRP/LDR-literal only).
