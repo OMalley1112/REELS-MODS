@@ -42,6 +42,8 @@ namespace ReelsMods
 
         private float toastTimer;
         private MenuRow hovered;
+        private Button hoveredBtn;   // tabs / page arrows / OPEN REEL (plain Buttons)
+        private Color hoveredBtnBase;
 
         private bool prevLeftPrimary, prevLeftSecondary;
         private bool prevRightPrimary, prevRightSecondary;
@@ -528,6 +530,7 @@ namespace ReelsMods
                 if (!plane.Raycast(ray, out float enter))
                 {
                     SetHovered(null);
+                    SetHoveredBtn(null);
                     SetLaser(false);
                     return;
                 }
@@ -546,12 +549,24 @@ namespace ReelsMods
             eventSystem.RaycastAll(ped, Results);
 
             MenuRow found = null;
+            Button foundBtn = null;
             for (int i = 0; i < Results.Count; i++)
             {
-                var r = Results[i].gameObject.GetComponentInParent<MenuRow>();
-                if (r != null) { found = r; break; }
+                var go = Results[i].gameObject;
+                if (found == null)
+                {
+                    var r = go.GetComponentInParent<MenuRow>();
+                    if (r != null) found = r;
+                }
+                if (foundBtn == null)
+                {
+                    var b = go.GetComponentInParent<Button>();
+                    if (b != null && b.interactable) foundBtn = b;
+                }
+                if (found != null && foundBtn != null) break;
             }
             SetHovered(found);
+            SetHoveredBtn(foundBtn);
         }
 
         private void SetHovered(MenuRow r)
@@ -562,10 +577,37 @@ namespace ReelsMods
             if (hovered != null) hovered.SetHover(true);
         }
 
+        // plain Buttons (tabs, < > page arrows, OPEN REEL) are not MenuRows,
+        // so the laser has to hover/click them separately
+        private void SetHoveredBtn(Button b)
+        {
+            if (hoveredBtn == b) return;
+            if (hoveredBtn != null)
+            {
+                var img = hoveredBtn.image;
+                if (img != null) img.color = hoveredBtnBase;
+            }
+            hoveredBtn = b;
+            if (hoveredBtn != null)
+            {
+                var img = hoveredBtn.image;
+                if (img != null)
+                {
+                    hoveredBtnBase = img.color;
+                    img.color = hoveredBtnBase * 1.35f + Color.white * 0.10f;
+                }
+            }
+        }
+
         private void ActivateHovered()
         {
             if (hovered != null && hovered.gameObject.activeInHierarchy)
+            {
                 hovered.onClick?.Invoke(hovered);
+                return;
+            }
+            if (hoveredBtn != null && hoveredBtn.interactable && hoveredBtn.gameObject.activeInHierarchy)
+                hoveredBtn.onClick.Invoke();
         }
 
         private void SetLaser(bool on, Vector3? from = null, Vector3? to = null)
